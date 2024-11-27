@@ -64,7 +64,7 @@ x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 2))
     regressor.compile(optimizer='rmsprop', loss=Huber())
     
     # Fit the model
-    regressor.fit(x_train, y_train, epochs=100, batch_size=20)
+    regressor.fit(x_train, y_train, epochs=30, batch_size=15)
 
 # Making the prediction and visualizing the result
 
