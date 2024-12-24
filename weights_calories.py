@@ -1,12 +1,14 @@
-# Importing necessary libraries
-import numpy as np
-import matplotlib.pyplot as plt
+# Import necessary libraries
 import pandas as pd
-from sklearn.impute import SimpleImputer
+import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-from keras.models import Sequential
-from keras.layers import LSTM, Dropout, Dense, Reshape
-from keras.losses import Huber
+from sklearn.impute import SimpleImputer
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dropout, Dense
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.linear_model import LinearRegression
+
 # Data Preprocessing
 dataset_train = pd.read_csv("D:\\project final year\\train_data.csv")
 
@@ -18,109 +20,122 @@ dataset_train[['Weight', 'Calories intake']] = imputer.fit_transform(
 
 # Scaling the dataset
 sc = MinMaxScaler(feature_range=(0, 1))
-scaled_training_set = sc.fit_transform(dataset_train[['Weight', 'Calories intake']])
+scaled_training_set = sc.fit_transform(dataset_train[['Weight', 'Calories intake']])  # Scaling only relevant columns
 
 # Creating input and output for training
 x_train = []
 y_train = []
 time_steps = 7
 
+# Process data for a sliding window of 7 days
 for i in range(time_steps, len(scaled_training_set) - time_steps):
-    x_train.append(scaled_training_set[i-time_steps:i, :])  # Last 7 days
-    y_train.append(scaled_training_set[i:i+time_steps, :])  # Next 7 days
+    x_train.append(scaled_training_set[i - time_steps:i, :])  # Last 7 days of all features
+    y_train.append(scaled_training_set[i:i + time_steps, 0])  # Next 7 days of weight (column 0)
 
+# Convert lists to numpy arrays
 x_train = np.array(x_train)
 y_train = np.array(y_train)
 
-# Reshaping the data to match LSTM input
+# Reshaping the data to match LSTM input (7 days, 2 features)
 x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 2))
-    
-    # Building the Recurrent Neural Network (RNN)
+
+    # Building the Recurrent Neural Network (RNN) - LSTM Model
     regressor = Sequential()
     
-    # First LSTM layer
-    regressor.add(LSTM(units=600, return_sequences=True, input_shape=(x_train.shape[1], 2)))
-    regressor.add(Dropout(0.1))
+    # First LSTM layer with dropout
+    regressor.add(LSTM(units=100, return_sequences=True, input_shape=(x_train.shape[1], 2)))
+    regressor.add(Dropout(0.2))
     
-    # Second LSTM layer
-    regressor.add(LSTM(units=600, return_sequences=True))
-    regressor.add(Dropout(0.1))
+    # Second LSTM layer with dropout
+    regressor.add(LSTM(units=100, return_sequences=True))
+    regressor.add(Dropout(0.2))
     
-    # Third LSTM layer
-    regressor.add(LSTM(units=600, return_sequences=True))
-    regressor.add(Dropout(0.1))
+    # Third LSTM layer with dropout
+    regressor.add(LSTM(units=100, return_sequences=True))
+    regressor.add(Dropout(0.2))
     
-    # Fourth LSTM layer
-    regressor.add(LSTM(units=600, return_sequences=False))
-    regressor.add(Dropout(0.1))
+    # Final LSTM layer with dropout
+    regressor.add(LSTM(units=100, return_sequences=False))
+    regressor.add(Dropout(0.2))
     
+    # Output layer (predicting 7 days, 1 feature - weight)
+    regressor.add(Dense(units=7))  # Predicting 7 time steps for weight
     
+    # Compile the model with Adam optimizer and MSE loss
+    regressor.compile(optimizer='adam', loss='mean_absolute_error')
     
-    # Output layer (predicting 7 days, 2 features)
-    regressor.add(Dense(units=7 * 2))  # 7 time steps, 2 features (Weight and Calories)
-    regressor.add(Reshape((7, 2)))  # Reshape output to match the expected target shape
+    # Early stopping callback
+    early_stopping_loss = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     
-    # Compile the model
-    regressor.compile(optimizer='rmsprop', loss=Huber())
-    
-    # Fit the model
-    regressor.fit(x_train, y_train, epochs=30, batch_size=15)
+    # Fit the model with early stopping
+    regressor.fit(
+        x_train, 
+        y_train, 
+        epochs=100, 
+        batch_size=32, 
+        validation_split=0.1, 
+        callbacks=[early_stopping_loss]
+    )
 
-# Making the prediction and visualizing the result
+# Extracting features from the LSTM output for Linear Regression
+lstm_output = regressor.predict(x_train)  # This will give 7 days of weight predictions (for each input)
+
+# Flatten the LSTM output to use as input to Linear Regression
+lstm_output_flat = lstm_output.reshape(lstm_output.shape[0], -1)  # Flatten to (samples, 7)
+
+# Train the Linear Regression model on the LSTM output
+linear_regressor = LinearRegression()
+linear_regressor.fit(lstm_output_flat, y_train)
+
+# Now, you can use the Linear Regression model to predict the weight
+# For the prediction, we'll also use the LSTM's output for the new input data
 
 # Load the test dataset
-dataset_test = pd.read_csv("D:\\project final year\\test_data.csv")
+dataset_test = pd.read_csv("D:\\project final year\\result.csv")
 
-# Combine the train and test datasets
-dataset_total = pd.concat((dataset_train[['Weight', 'Calories intake']], dataset_test[['Weight', 'Calories intake']]), axis=0)
+# Load the input data for prediction
+file_path = 'D:\\project final year\\inputs.csv'
+inputs = pd.read_csv(file_path)
 
-# Extract the last 7 days of data for prediction
-inputs = dataset_total[len(dataset_total) - 7:].values  # Last 7 days of data
+# Ensure the same columns are used during prediction (Weight and Calories intake)
+inputs_scaled = sc.transform(inputs[['Weight', 'Calories intake']])
 
-# Reshape the inputs to match the model's expected shape (1 sample, 7 time steps, 2 features)
-inputs_scaled = sc.transform(inputs.reshape(-1, 2))  # Flatten the input to apply scaler
-inputs_scaled = inputs_scaled.reshape(1, 7, 2)  # Reshape back to 3D tensor (1, 7, 2)
+# Reshape the input data to the expected shape (1, 7, 2)
+inputs_scaled = inputs_scaled.reshape(1, 7, 2)
 
-# Predict the next 7 days
-predicted_values = regressor.predict(inputs_scaled)
+# Get the LSTM output for the input data
+lstm_output_for_input = regressor.predict(inputs_scaled)
 
-# Reshape the predictions to 2D for inverse transformation
-predicted_values_flat = predicted_values.reshape(-1, 2)
+# Flatten the LSTM output and make predictions using Linear Regression
+lstm_output_for_input_flat = lstm_output_for_input.reshape(1, -1)  # Flatten to (1, 7)
+predicted_weight = linear_regressor.predict(lstm_output_for_input_flat)
+# Make sure the predicted_weight is reshaped to 2D before applying inverse transformation
+# predicted_weight originally has shape (7, 1), we need to combine it with zeros for the Calories intake feature
+predicted_weight_reshaped = np.reshape(predicted_weight, (-1, 1))  # Ensure it's 2D with shape (7, 1)
 
-# Apply the inverse transformation to get actual scale values
-predicted_values_flat = sc.inverse_transform(predicted_values_flat)
+# Add zeros for the Calories intake feature (second column)
+predicted_values_with_zeros = np.hstack((predicted_weight_reshaped, np.zeros_like(predicted_weight_reshaped)))
 
-# Get the actual values from dataset_test for the next 7 days
-actual_values = dataset_test[['Weight', 'Calories intake']].iloc[:7].values
+# Apply inverse transformation for the combined data (Weight and Calories intake)
+predicted_weight = sc.inverse_transform(predicted_values_with_zeros)[:, 0]
 
-# Plotting actual vs predicted values for Weight and Calories in separate subplots
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
-# Import necessary libraries
-import matplotlib.pyplot as plt
+# Get the actual values for the next 7 days from the test dataset
+actual_values = dataset_test[['Weight']].values
 
-# Create two subplots: one for weight and one for calories
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+# Plotting actual vs predicted values for Weight
+plt.figure(figsize=(10, 6))
 
-# Plot actual and predicted weight on the first subplot (ax1)
-ax1.plot(range(7), actual_values[:, 0], color='red', label='Actual Weight')  # Actual Weight
-ax1.plot(range(7), predicted_values_flat[:, 0], color='blue', linestyle='--', label='Predicted Weight')  # Predicted Weight
-ax1.set_title('Actual vs Predicted Weight for Next 7 Days')
-ax1.set_xlabel('Days')
-ax1.set_ylabel('Weight')
-ax1.legend()
-ax1.grid(True)
+# Plot actual and predicted weight
+plt.plot(range(7), actual_values[:, 0], color='red', label='Actual Weight')  # Actual Weight
+plt.plot(range(7), predicted_weight, color='blue', linestyle='--', label='Predicted Weight')  # Predicted Weight
 
-# Plot actual and predicted calories on the second subplot (ax2)
-ax2.plot(range(7), actual_values[:, 1], color='green', label='Actual Calories')  # Actual Calories
-ax2.plot(range(7), predicted_values_flat[:, 1], color='orange', linestyle='--', label='Predicted Calories')  # Predicted Calories
-ax2.set_title('Actual vs Predicted Calories Intake for Next 7 Days')
-ax2.set_xlabel('Days')
-ax2.set_ylabel('Calories')
-ax2.legend()
-ax2.grid(True)
-
-# Adjust layout for better spacing between subplots
-plt.tight_layout()
+# Add plot titles and labels
+plt.title('Actual vs Predicted Weight for Next 7 Days')
+plt.xlabel('Days')
+plt.ylabel('Weight')
+plt.ylim(50, 90)  # Adjust y-axis range based on your data
+plt.legend()
+plt.grid(True)
 
 # Show the plot
 plt.show()
