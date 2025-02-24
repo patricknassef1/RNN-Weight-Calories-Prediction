@@ -43,26 +43,22 @@ x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 2))
     regressor = Sequential()
     
     # First LSTM layer with dropout
-    regressor.add(LSTM(units=100, return_sequences=True, input_shape=(x_train.shape[1], 2)))
+    regressor.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 2)))
     regressor.add(Dropout(0.2))
     
     # Second LSTM layer with dropout
-    regressor.add(LSTM(units=100, return_sequences=True))
-    regressor.add(Dropout(0.2))
-    
-    # Third LSTM layer with dropout
-    regressor.add(LSTM(units=100, return_sequences=True))
+    regressor.add(LSTM(units=50, return_sequences=True))
     regressor.add(Dropout(0.2))
     
     # Final LSTM layer with dropout
-    regressor.add(LSTM(units=100, return_sequences=False))
+    regressor.add(LSTM(units=50, return_sequences=False))
     regressor.add(Dropout(0.2))
     
     # Output layer (predicting 7 days, 1 feature - weight)
     regressor.add(Dense(units=7))  # Predicting 7 time steps for weight
-    
+    from tensorflow.keras.optimizers import RMSprop
     # Compile the model with Adam optimizer and MSE loss
-    regressor.compile(optimizer='adam', loss='mean_absolute_error')
+    regressor.compile(optimizer=RMSprop(learning_rate=0.001), loss='mean_squared_error')
     
     # Early stopping callback
     early_stopping_loss = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
@@ -72,7 +68,7 @@ x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 2))
         x_train, 
         y_train, 
         epochs=100, 
-        batch_size=32, 
+        batch_size=16, 
         validation_split=0.1, 
         callbacks=[early_stopping_loss]
     )
@@ -139,3 +135,18 @@ plt.grid(True)
 
 # Show the plot
 plt.show()
+
+
+
+from tensorflow.keras.models import load_model
+
+# Save the trained LSTM model
+regressor.save("lstm_model.h5")
+
+
+import joblib
+
+joblib.dump(linear_regressor, "linear_regressor.pkl")
+
+joblib.dump(sc, "scaler.pkl")
+
